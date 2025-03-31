@@ -5,6 +5,7 @@ using namespace std;
 
 //全局变量定义
 string name[5] = { "dragon", "ninja", "iceman", "lion", "wolf" };
+int caseTest, element, strength[5], flagRed=1, flagBlue=1;
 
 class headquarter{
 	private:
@@ -116,6 +117,7 @@ void headquarter::produceWarrior(){
 	++time;
 	num = (++num) % 5;
 }
+
 //int 是是否需要总部继续制造战士的信号，1 or 0
 int headquarter::decideWarrior(){
 	int flagCon = 1;//决定是否继续的旗子，默认为1
@@ -155,7 +157,25 @@ int headquarter::decideWarrior(){
 
 }
 
-void 
+void initialize()
+{
+	cin >> element >> strength[0] >> strength[1] >> strength[2] >> strength[3] >> strength[4];
+		headquarter red("red", element, name, strength);
+		headquarter blue("blue", element, name, strength);
+		while(flagRed == 1 || flagBlue == 1){
+			if(flagRed == 1){
+				flagRed = red.decideWarrior();
+			}
+			if(flagBlue == 1){
+				flagBlue = blue.decideWarrior();
+			}
+		}
+}
+
+void start()
+{
+
+}
 
 int main(){
 	string name[5] = { "dragon", "ninja", "iceman", "lion", "wolf" };
