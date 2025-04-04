@@ -207,9 +207,10 @@ vector<Arm *> armBin;//收集废弃的武器
 vector<Warrior *> deadWarrior;//收集死掉的战士
 int subLoyalty = 1;
 int T = 0;
-vector<int> min = {0, 5, 10, 35, 40, 50, 55};
+vector<int> minute = {0, 5, 10, 35, 40, 50, 55};
 int hm = T/60;//hour max小时数，无需向上取整，因为时间从0开始
 int mr = T % 60;//minute remain剩下的时间
+bool GAMEOVER = false;//游戏结束标志
 
 ////////////////////////////////define headquarter
 class Headquarters{
@@ -224,7 +225,7 @@ class Headquarters{
 		int count;//已经制造的战士总个数（从1开始）以及
 		int num;//应该制造的战士种类（从0到4）
 		void produceWarrior();//已经制造的战士总个数和应该制造的战士种类来制造战士的函数
-		vector<shared_ptr<Warrior>> warrior;//all the warriors
+		vector<shared_ptr<Warrior>> allWarrior;//all the warriors
 	public:
 		int decideWarrior();//考虑是否有足够的生命元继续制造战士，以及应该制造什么
 		Headquarters(string headquartersName, int element, vector<string> name, vector<int> strength);//构造函数，用来初始化
@@ -233,6 +234,7 @@ class Headquarters{
 		int getCount() const{return count;}//获取当前已经制造的战士个数
 		vector<int> getWarriorStrength() const{return warriorStrength;}//每种战士的生命值
 		void createWarrior(int num);//根据目前num来决定创造哪一种战士，加入到vector中
+		void copeDeadWarrior();//定期处理死掉的战士，放到全局变量中
 
 };
 ////////////////////////////////////////////////
@@ -241,11 +243,19 @@ class Headquarters{
 class Arm
 {
 public:
-	Arm(const string & k):kind(k){}
+	Arm(const string & k):kind(k){avail = true;}
 	string getKind(){return kind;}
+	virtual void attackOnce(Warrior *pObj) {}//进攻 //传入实参还是指针呢,就传入指针
+	virtual void setAttack(Warrior *owner){}
+	virtual void isAvail(){}
+	virtual void wear(){}
+	void setOwner(Warrior *owner){this->owner = owner;}
+	Warrior *getOwner(){return owner;}
 protected:
-	int ad;//attack
+	int attack;//attack
 	string kind;
+	Warrior *owner;
+	bool avail;//是否可用，available
 };
 
 //define sword
@@ -253,6 +263,9 @@ class Sword: public Arm
 {
 public:
 	Sword():Arm("sword"){}
+	virtual void attackOnce(Warrior *pObj);
+	virtual void setAttack(){attack = owner->getAttack() * 2 / 10;}
+	virtual void isAvail(){}
 };
 
 //define bomb
@@ -260,6 +273,11 @@ class Bomb: public Arm
 {
 public:
 	Bomb():Arm("bomb"){}
+	virtual void attackOnce(Warrior *pObj);
+	virtual void setAttack(){attack = owner->getAttack() * 4 / 10;}
+	virtual void isAvail(){if(usage == 1){avail = false;}}
+private:
+	int usage;
 };
 
 //define arrow
@@ -267,7 +285,11 @@ class Arrow: public Arm
 {
 public:
 	Arrow():Arm("arrow"){}
-
+	virtual void attackOnce(Warrior *pObj);
+	virtual void setAttack(){attack = owner->getAttack() * 3 / 10;}
+	virtual void isAvail(){if(usage == 2){avail = false;}}
+private:
+	int usage;
 };
 ////////////////////////////////////////////////
 
@@ -275,18 +297,26 @@ public:
 class Warrior
 {
 public:
-	Warrior(){}
-	Warrior(const Headquarters & hq):id(hq.getCount()){}
+	Warrior(){dead = false;}
+	Warrior(const Headquarters & hq):id(hq.getCount()){dead = false;}
 	int getId(){return id;}
 	int getStrength(){return strength;}
+    int getAttack(){return attack;}
+	bool getDead(){return dead;}
 	vector<shared_ptr<Arm>> getArm(){return arm;}
 	void showArm() const;
 	void equipArm(int i);
 	virtual void printInfo() const {}
+	void isDead();//在isHurt里被调用，是负责处理后事的
+	void isHurt(int a);//受到攻击的时候调用，a是伤害
+	virtual void march(){}
 protected:
-	int id;
-	int strength;
-	vector<shared_ptr<Arm>> arm;
+	int id;//编号
+	int strength;//生命值
+    int attack;//攻击力
+	bool dead;//是否死亡，初始构造为false
+	vector<shared_ptr<Arm>> arm;//
+	City *pos;//目前处于的城市
 	 
 };
 
@@ -392,7 +422,20 @@ public:
 ////////////////////////////////////////////////
 class City
 {
-    
+public:
+	City()//initialize
+	{
+		pRed = NULL;
+		pBlue = NULL;
+	}
+	bool checkTwo(){if(pRed != NULL && pBlue != NULL){return true;}else{return false;}}//检查是否有一红一蓝战士，可以打架
+    void fight(Warrior *pRed, Warrior *pBlue);
+	void redArrive(Warrior *pRed){this->pRed = pRed;}
+	void blueArrive(Warrior *pBlue){this->pBlue = pBlue;}
+private:
+	Warrior *pRed;
+	Warrior *pBlue;
+
 };
 ////////////////////////////////////////////////
 
@@ -426,7 +469,8 @@ void Headquarters::produceWarrior(){
 	++warriorCount[num];
 	element -= warriorStrength[num];
 
-	cout << setfill('0') << setw(3) << time << " " << headquartersName << " " << warriorName[num] << " ";
+	//cout << setfill('0') << setw(3) << time << " " << headquartersName << " " << warriorName[num] << " ";
+	cout << " " << headquartersName << " " << warriorName[num] << " ";
 	++count;
 
 	cout << count << "born with strength " << warriorStrength[num] << "," << warriorCount[num] << " " << warriorName[num] << " in " << headquartersName << "headquarters" << endl;
@@ -443,35 +487,35 @@ void Headquarters::createWarrior(int num)
 		case 0:
 		{
 			auto pDragon = make_shared<Dragon>(static_cast<const Headquarters &>(*this));
-			warrior.push_back(pDragon);
+			allWarrior.push_back(pDragon);
 			pDragon->printInfo();
 			break;
 		}
 		case 1:
 		{
 			auto pNinja = make_shared<Ninja>(static_cast<const Headquarters &>(*this));
-			warrior.push_back(pNinja);
+			allWarrior.push_back(pNinja);
 			pNinja->printInfo();
 			break;
 		}
 		case 2:
 		{
 			auto pIceman = make_shared<Iceman>(static_cast<const Headquarters &>(*this));
-			warrior.push_back(pIceman);
+			allWarrior.push_back(pIceman);
 			pIceman->printInfo();
 			break;
 		}
 		case 3:
 		{
 			auto pLion = make_shared<Lion>(static_cast<const Headquarters &>(*this));
-			warrior.push_back(pLion);
+			allWarrior.push_back(pLion);
 			pLion->printInfo();
 			break;
 		}
 		case 4:
 		{
 			auto pWolf = make_shared<Wolf>(static_cast<const Headquarters &>(*this));
-			warrior.push_back(pWolf);
+			allWarrior.push_back(pWolf);
 			pWolf->printInfo();
 			break;
 		}
@@ -498,7 +542,8 @@ int Headquarters::decideWarrior(){
 		}
 		
 		if(flagCon == 0){
-			cout << setfill('0') << setw(3) << time << " " << headquartersName << " headquarter stops making warriors" << endl;
+			//cout << setfill('0') << setw(3) << time << " " << headquartersName << " headquarter stops making warriors" << endl;
+			cout << " " << headquartersName << " headquarter stops making warriors" << endl;
 		}
 		else{
 			num = numTmp;
@@ -508,9 +553,43 @@ int Headquarters::decideWarrior(){
 	return flagCon;
 
 }
+
+//自己写的算法，看看有没有问题
+void Headquarters::copeDeadWarrior()//定期处理死掉的战士
+{
+	auto firstDead = allWarrior.begin();
+
+	for(auto it = allWarrior.begin(); it !=allWarrior.end(); ++it)
+	{
+		if(!(*it)->getDead())
+		{
+			if(it != firstDead){iter_swap(it, firstDead);}
+			++firstDead;
+		}
+	}
+
+	for(auto it = firstDead; it != allWarrior.end(); ++it){deadWarrior.push_back(it->get());}
+
+	allWarrior.erase(firstDead, allWarrior.end());
+}
 /////////////////////////////////////////
 
 /////////////////////////////////////////functions of armament
+
+void Sword::attackOnce(Warrior *pObj)
+{
+	pObj->isHurt(attack);
+}
+
+void Bomb::attackOnce(Warrior *pObj)
+{
+	pObj->isHurt(attack);
+}
+
+void Arrow::attackOnce(Warrior *pObj)
+{
+	pObj->isHurt(attack);
+}
 
 /////////////////////////////////////////
 
@@ -544,11 +623,28 @@ void Warrior::showArm() const
 	}
 }
 
+void Warrior::isDead(){dead = true;}//只负责死，由总部来处理后事，由于战士的vector在headquarters
 
+void Warrior::isHurt(int a)
+{
+	if(strength <= a){strength = 0;isDead();}else{strength -= a;}
+}
+
+void Warrior::march()
+{
+
+}
+//////////////////////////////////////////
+
+//////////////////////////////////////////city functions
+void City::fight(Warrior *red, Warrior *blue)
+{
+
+}
 //////////////////////////////////////////
 
 
-
+//////////////////////////////////////overall functions
 //initialize input life element and strength every warrior use
 void initialize()
 {
@@ -558,8 +654,36 @@ void initialize()
 //start preparing
 void start()
 {
-	Headquarters red(nameHq[0], elementLife, name, strengthHq);
-	Headquarters blue(nameHq[1], elementLife, name, strengthHq);	
+	static Headquarters red(nameHq[0], elementLife, name, strengthHq);
+	static Headquarters blue(nameHq[1], elementLife, name, strengthHq);	
+	for(int i = 0; i <= hm;++i)
+	{
+		for(int j = 0; j < minute.size();++j)
+		{
+			if(i * 60 + j > T){break;}
+			switch(j)
+			{
+				case 0:
+				{
+					while(flagRed == 1 || flagBlue == 1){
+						cout << setfill('0') << setw(3) << i << " " << setfill('0') << setw(2) << minute[j];
+						if(flagRed == 1){
+							flagRed = red.decideWarrior();
+						}
+						cout << setfill('0') << setw(3) << i << " " << setfill('0') << setw(2) << minute[j];
+						if(flagBlue == 1){
+							flagBlue = blue.decideWarrior();
+						}
+					}
+				}
+
+				case 1:
+				{
+
+				}
+			}
+		}
+	}
 	while(flagRed == 1 || flagBlue == 1){
 		if(flagRed == 1){
 			flagRed = red.decideWarrior();
@@ -569,9 +693,10 @@ void start()
 		}
 	}
 }
+///////////////////////////////////////
 
 
-//main
+/////////////////////////////////////////main
 int main(){
 	int cases;
 	cin >> cases;
@@ -585,3 +710,4 @@ int main(){
 	}
 	return 0;
 }
+////////////////////////////////////////////
